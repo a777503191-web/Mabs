@@ -1,4 +1,4 @@
-name: CI/CD Production Build
+name: CI/CD Production APK Build (Keep Local Assets)
 
 on:
   push:
@@ -14,13 +14,12 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Unzip and Move Project Files
+    - name: Unzip and Move Project Files (Preserve Android Folder)
       run: |
         mkdir -p temp_project
         unzip -q "*.zip" -d temp_project
         PROJECT_DIR=$(find temp_project -maxdepth 3 -name "package.json" -exec dirname {} \;)
-        # حفظ مسار مجلد الأيقونات الخاص بك قبل المسح
-        cp -r $PROJECT_DIR/android/app/src/main/res/mipmap-* ./saved_icons 2>/dev/null || echo "No icons found"
+        # نسخ المشروع بالكامل بما فيه مجلد أندرويد الجاهز الخاص بك لضمان عدم ضياع الأيقونات والأسماء
         cp -r $PROJECT_DIR/* .
         rm -rf temp_project
 
@@ -41,27 +40,18 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Build Android App
+    - name: Direct Build from Existing Android Directory
       run: |
-        # 1. حذف المجلد التالف وإعادة إنشائه بواسطة Capacitor
-        rm -rf android
-        npx cap add android
-        
-        # 2. استعادة أيقوناتك الأصلية إلى مجلد الأندرويد الجديد
-        if [ -d "saved_icons" ]; then
-          cp -r saved_icons/* android/app/src/main/res/
-        fi
-        
-        # 3. المزامنة
+        # 1. منع حذف مجلد أندرويد وعمل مزامنة فقط لحقن تحديثات الـ Web داخل مشروعك الجاهز
         npx cap sync android
         
-        # 4. بناء التطبيق
+        # 2. منح الصلاحيات لملف الجرادل المرفوع في مشروعك وبناء الـ APK بدون توقيع
         cd android
         chmod +x gradlew
-        ./gradlew assembleDebug
+        ./gradlew assembleRelease --no-daemon
 
-    - name: Upload APK
+    - name: Upload Unsigned APK with Your Custom Icons
       uses: actions/upload-artifact@v4
       with:
-        name: JAM-Pro-Debug-APK
-        path: android/app/build/outputs/apk/debug/*.apk
+        name: JAM-System-Pro-Ready-APK
+        path: android/app/build/outputs/apk/release/*-unsigned.apk
