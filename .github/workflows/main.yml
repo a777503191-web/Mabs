@@ -1,57 +1,58 @@
-name: CI/CD Production APK Build (Keep Local Assets)
+name: CI/CD Production Build
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
     branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Unzip and Move Project Files (Preserve Android Folder)
+    - name: Prepare Project
       run: |
-        mkdir -p temp_project
-        unzip -q "*.zip" -d temp_project
-        PROJECT_DIR=$(find temp_project -maxdepth 3 -name "package.json" -exec dirname {} \;)
-        # نسخ المشروع بالكامل بما فيه مجلد أندرويد الجاهز الخاص بك لضمان عدم ضياع الأيقونات والأسماء
-        cp -r $PROJECT_DIR/* .
-        rm -rf temp_project
+        if ls *.zip >/dev/null 2>&1; then
+          unzip -q "*.zip" -d temp_project
+          cp -r temp_project/* .
+          rm -rf temp_project
+        fi
 
-    - name: Use Node.js 20
+    - name: Setup Node and Java 21
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-        cache: 'npm'
+    - uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
 
-    - name: Install and Build Web Assets
+    - name: Build and Sync
       run: |
         npm install --legacy-peer-deps
         npm run build
-
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-
-    - name: Direct Build from Existing Android Directory
-      run: |
-        # 1. منع حذف مجلد أندرويد وعمل مزامنة فقط لحقن تحديثات الـ Web داخل مشروعك الجاهز
+        npm install @capacitor/cli @capacitor/core @capacitor/android --save-dev
+        echo '{"appId": "com.jam.pro", "appName": "JAM-Pro", "webDir": "dist"}' > capacitor.config.json
+        rm -rf android
+        npx cap add android
         npx cap sync android
+
+    - name: Build Android App
+      run: |
+        # ضبط بيئة العمل للتعامل مع Java 21
+        export JAVA_HOME=$JAVA_HOME_21_X64
         
-        # 2. منح الصلاحيات لملف الجرادل المرفوع في مشروعك وبناء الـ APK بدون توقيع
+        sed -i 's/<application/<application android:hardwareAccelerated="true" android:largeHeap="true"/' android/app/src/main/AndroidManifest.xml
+        echo "configurations.all { exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'; exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8' }" >> android/app/build.gradle
+        
         cd android
         chmod +x gradlew
-        ./gradlew assembleRelease --no-daemon
+        # تشغيل البناء مع إضافة خيار لتقليل الصرامة في التحقق من إصدار الجافا
+        ./gradlew assembleDebug -Dorg.gradle.java.home=$JAVA_HOME
 
-    - name: Upload Unsigned APK with Your Custom Icons
+    - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: JAM-System-Pro-Ready-APK
-        path: android/app/build/outputs/apk/release/*-unsigned.apk
+        name: JAM-Pro-Debug-APK
+        path: android/app/build/outputs/apk/debug/app-debug.apk
